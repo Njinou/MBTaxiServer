@@ -56,6 +56,7 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
       return snapshot.ref.parent.child('uppercase').set(uppercase);
     });
 
+    //beginning of functions not embedded.....
     function compareDistance(a, b) {
       //properties
       return a.properties.distanceToPoint - b.properties.distanceToPoint;
@@ -72,7 +73,7 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
       if (!points) throw new Error("points is required");
       
       let finalArray = [];
-      let arraySize = points.length<=10? points.length: 10;
+      let arraySize = points.features.length<=10? points.features.length: 10;
       var neighborArray =  new Array(arraySize);
       for (j=0 ; j <neighborArray.length; j++){
 
@@ -125,15 +126,11 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
     }
 
 
-    exports.neighborhoodToClient = functions.database.ref('users/destinationPoint/{destinationId}/clients/{values}')
+    exports.driversOnClientDestination = functions.database.ref('users/destinationPoint/{destinationId}/clients/{values}')
     .onCreate((snapshot, context) => {
       // Grab the current value of what was written to the Realtime Database.
       const original = snapshot.val();
-      functions.logger.log('Uppercasing', context.params.destinationId, original);
-      const uppercase = original.toUpperCase();
-
-
-
+      functions.logger.log('drivers on the path', context.params.destinationId, original);
       admin.database()
       .ref('/drivers/midPoints')
       .on('value', snapshot => {
@@ -158,40 +155,78 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
             admin.database().ref('/users/destinationPoint/' +context.params.destinationId  + '/driverOnThePath').child(db).set(lam)
           }
         )
-      })
+     })
 
-     /* admin.database()
-      .ref('/drivers/midPoints')
-      .on('value', snapshot => {
-        
-       // let driversMidPoints = Object.values(snapshot.val())[0];
-         //let altitudePoint = context.params.destinationId.split(',');
-         altitudePoint = altitudePoint.map( elmnt =>  Number((elmnt.replace("+","."))));
+     
+    });
 
-          
-         //var targetPoint = turf.point(altitudePoint, {"marker-color": "#0F0"});
-         //var points = turf.featureCollection( driversMidPoints.map( rslt => turf.point(rslt)));
-         let driversMidPointsKey = Object.entries(snapshot.val());
-         let altitudePoint = context.params.destinationId.split(',');
-         altitudePoint = altitudePoint.map( elmnt =>  Number((elmnt.replace("+","."))));
 
-          
-         var targetPoint = turf.point(altitudePoint, {"marker-color": "#0F0"});
-         var points = turf.featureCollection( driversMidPointsKey.map( rslt => {
-            let obj = turf.point(rslt[1]);
-            obj.driverID= rslt[0];
+
+
+
+    exports.driversCloseToClientpickupPoint = functions.database.ref('users/pickupPoint/{pickupID}/clients/{pushID}') ///clients
+    .onCreate((snapshot, context) => {
+     const original = snapshot.val();
+      functions.logger.log('neighbor drivers', context.params.pickupID, original);
+       admin.database()
+          .ref('/drivers/position')
+          .on('value', snapshot => {
+            let driversMidPointsKey = Object.entries(snapshot.val());
+            
+            let altitudePoint = context.params.pickupID.split(',');
+            altitudePoint = altitudePoint.map( elmnt =>  Number((elmnt.replace("+","."))));
+            var targetPoint = turf.point(altitudePoint, {"marker-color": "#0F0"});
+
+             let pointsWithDriverID = turf.featureCollection( driversMidPointsKey.map (elmnt => {
+              let altitudePoinet = elmnt[1].split(',');
+                 let rsltFina =  altitudePoinet.map( elmnt =>  Number((elmnt.replace("+","."))));
+                  console.log("here are the right and wrong.. ", rsltFina);
+                let  obj= turf.point(rsltFina)
+                obj.driverID = elmnt[0]
+               return obj;
+             }))
+             return  admin.database().ref('/users/pickupPoint/' + context.params.pickupID + '/neighbor').set(neighborPointMod(targetPoint, pointsWithDriverID))
+           
+          })
+    });
+
+
+                                                                               
+    exports.driversOntThePathCloseToClientpickupPoint = functions.database.ref('users/destinationPoint/{targetID}/driverOnThePath/{driverPositionID}')
+    .onWrite((snapshot, context) => {
+          admin.database().ref('/users/destinationPoint/' + context.params.targetID + '/driverOnThePath/').orderByChild('/users/destinationPoint/{targetID}/driverOnThePath/{driverPositionID}/properties/distanceToPoint')
+          .limitToFirst(20)
+          .on(
+            'value', snapshot => {
+       // admin.database().ref('/messingup').push(snapshot.val())
+
+       //GET THE CLIENT POSITION....  /clients Object.values() => 
+               /*let driversMidPointsKey = Object.entries(snapshot.val());
+        let altitudePoint = context.params.destinationId.split(',');
+        altitudePoint = altitudePoint.map( elmnt =>  Number((elmnt.replace("+","."))));
+        var targetPoint = turf.point(altitudePoint, {"marker-color": "#0F0"});
+
+         let  pointNeighbors = driversMidPointsKey.map( pndt => {
+
+          var pointes = turf.featureCollection( pndt[1].map( rslt => {
+            let obj = turf.point(rslt);
+            obj.driverPositionID= pndt[0];
             return obj;
           }
           ));
-         
-         admin.database().ref('/successfullStory').child(context.params.destinationId).set(neighborPointMod(targetPoint, points));
+          return nearestPointMod(targetPoint, pointes)
+        })  
+        pointNeighbors.map(lam =>  { 
+          let db= JSON.stringify(lam.geometry.coordinates[0]).replace('.','+') +','+JSON.stringify(lam.geometry.coordinates[1]).replace('.','+');
+            admin.database().ref('/users/destinationPoint/' + context.params.targetID  + '/driverOnThePath').child(lam.driverPositionID ).set(lam)
+          }
+        )*/
 
 
-      });*/
+            }
+          )
+          
 
-      // You must return a Promise when performing asynchronous tasks inside a Functions such as
-      // writing to the Firebase Realtime Database.
-      // Setting an "uppercase" sibling in the Realtime Database returns a Promise.
-    //  return snapshot.ref.parent.child('uppercaseCut').set(uppercase);
-     
+          
+       
     });
