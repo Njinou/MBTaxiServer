@@ -15,48 +15,8 @@ admin.initializeApp();
 
 // Take the text parameter passed to this HTTP endpoint and insert it into 
 // Firestore under the path /messages/:documentId/original
-exports.addMessage = functions.https.onRequest(async (req, res) => {
-    // Grab the text parameter.
-    const original = req.query.text;
-    // Push the new message into Firestore using the Firebase Admin SDK.
-    const writeResult = await admin.firestore().collection('messages').add({original: original});
-    // Send back a message that we've successfully written the message
-    res.json({result: `Message with ID: ${writeResult.id} added.`});
-  });
 
-
-  // Listens for new messages added to /messages/:documentId/original and creates an
-// uppercase version of the message to /messages/:documentId/uppercase
-exports.makeUppercase = functions.firestore.document('/messages/{documentId}')
-.onCreate((snap, context) => {
-  // Grab the current value of what was written to Firestore.
-  const original = snap.data().original;
-
-  // Access the parameter `{documentId}` with `context.params`
-  functions.logger.log('Uppercasing', context.params.documentId, original);
-  
-  const uppercase = original.toUpperCase();
-  
-  // You must return a Promise when performing asynchronous tasks inside a Functions such as
-  // writing to Firestore.
-  // Setting an 'uppercase' field in Firestore document returns a Promise.
-  return snap.ref.set({uppercase}, {merge: true});
-});
-
-
-exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original}')
-    .onCreate((snapshot, context) => {
-      // Grab the current value of what was written to the Realtime Database.
-      const original = snapshot.val();
-      functions.logger.log('Uppercasing', context.params.pushId, original);
-      const uppercase = original.toUpperCase();
-      // You must return a Promise when performing asynchronous tasks inside a Functions such as
-      // writing to the Firebase Realtime Database.
-      // Setting an "uppercase" sibling in the Realtime Database returns a Promise.
-      return snapshot.ref.parent.child('uppercase').set(uppercase);
-    });
-
-    //beginning of functions not embedded.....
+//beginning of functions not embedded.....
     function compareDistance(a, b) {
       //properties
       return a.properties.distanceToPoint - b.properties.distanceToPoint;
@@ -126,14 +86,14 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
     }
 
 
-    exports.driversOnClientDestination = functions.database.ref('users/destinationPoint/{destinationId}/clients/{values}')
-    .onCreate((snapshot, context) => {
+    exports.driversOnClientDestination = functions.database.ref('users/destinationPoint/{destinationId}/clients/{values}/{pushID}')
+    .onWrite( (snapshot, context) => {
       // Grab the current value of what was written to the Realtime Database.
-      const original = snapshot.val();
-      functions.logger.log('drivers on the path', context.params.destinationId, original);
+     // const original = snapshot.val();
+     // functions.logger.log('drivers on the path', context.params.destinationId, original);
       admin.database()
       .ref('/drivers/midPoints')
-      .on('value', snapshot => {
+      .on('value',async snapshot => {
 
         let driversMidPointsKey = Object.entries(snapshot.val());
         let altitudePoint = context.params.destinationId.split(',');
@@ -150,11 +110,39 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
           ));
           return nearestPointMod(targetPoint, pointes)
         })  
-        pointNeighbors.map(lam =>  { 
+
+        //choisir les chauffeurs allant dans la direction qui sont proches des utilisateurs.
+         let AllFavouriteDriversPosition = await Promise.all( pointNeighbors.map( async lam =>  { 
           let db= JSON.stringify(lam.geometry.coordinates[0]).replace('.','+') +','+JSON.stringify(lam.geometry.coordinates[1]).replace('.','+');
             admin.database().ref('/users/destinationPoint/' +context.params.destinationId  + '/driverOnThePath').child(db).set(lam)
-          }
-        )
+            
+            const driversP = await admin.database().ref('/drivers/position/').child(lam.driverID).once('value')// orderByKey().equalTo(lam.driverID).once('value')
+            
+            driverPosition = driversP.val()
+            driverPosition = driverPosition.split(",")
+            driverPosition = driverPosition.map( elmnt =>  Number((elmnt.replace("+","."))))
+            let obj= {};
+            obj.driverId = lam.driverID;
+            obj.point = driverPosition;
+            return obj;
+        })
+      ) 
+        //convertir la position de l'utilisateur en question
+        let voisinageClient = context.params.values.split(',');
+          voisinageClient = voisinageClient.map( elmnt =>  Number((elmnt.replace("+","."))));
+        //convertir en turf point les chauffeurs
+      let voisinageClientDriverID = turf.featureCollection( AllFavouriteDriversPosition.map (elmnt => {
+          let  obja= turf.point(elmnt.point)
+          obja.driverID = elmnt.driverId
+         return obja;
+       }))
+       
+       //choisir les 10 plus proches ... chauffeurs allant dans cette directions.... 
+       let chauffeurFavorable = neighborPointMod(voisinageClient,voisinageClientDriverID);
+
+       admin.database().ref('/users/favori/').child(context.params.values).set(chauffeurFavorable);
+        return snapshot.ref.parent.parent.child('DriverInDestinationDirection').set({tester:"voir..."});
+        
      })
 
      
@@ -166,8 +154,8 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
 
     exports.driversCloseToClientpickupPoint = functions.database.ref('users/pickupPoint/{pickupID}/clients/{pushID}') ///clients
     .onCreate((snapshot, context) => {
-     const original = snapshot.val();
-      functions.logger.log('neighbor drivers', context.params.pickupID, original);
+     //const original = snapshot.val();
+     // functions.logger.log('neighbor drivers', context.params.pickupID, original);
        admin.database()
           .ref('/drivers/position')
           .on('value', snapshot => {
@@ -190,43 +178,3 @@ exports.makeUppercaseTest = functions.database.ref('/messages/{pushId}/{original
           })
     });
 
-
-                                                                               
-    exports.driversOntThePathCloseToClientpickupPoint = functions.database.ref('users/destinationPoint/{targetID}/driverOnThePath/{driverPositionID}')
-    .onWrite((snapshot, context) => {
-          admin.database().ref('/users/destinationPoint/' + context.params.targetID + '/driverOnThePath/').orderByChild('/users/destinationPoint/{targetID}/driverOnThePath/{driverPositionID}/properties/distanceToPoint')
-          .limitToFirst(20)
-          .on(
-            'value', snapshot => {
-       // admin.database().ref('/messingup').push(snapshot.val())
-
-       //GET THE CLIENT POSITION....  /clients Object.values() => 
-               /*let driversMidPointsKey = Object.entries(snapshot.val());
-        let altitudePoint = context.params.destinationId.split(',');
-        altitudePoint = altitudePoint.map( elmnt =>  Number((elmnt.replace("+","."))));
-        var targetPoint = turf.point(altitudePoint, {"marker-color": "#0F0"});
-
-         let  pointNeighbors = driversMidPointsKey.map( pndt => {
-
-          var pointes = turf.featureCollection( pndt[1].map( rslt => {
-            let obj = turf.point(rslt);
-            obj.driverPositionID= pndt[0];
-            return obj;
-          }
-          ));
-          return nearestPointMod(targetPoint, pointes)
-        })  
-        pointNeighbors.map(lam =>  { 
-          let db= JSON.stringify(lam.geometry.coordinates[0]).replace('.','+') +','+JSON.stringify(lam.geometry.coordinates[1]).replace('.','+');
-            admin.database().ref('/users/destinationPoint/' + context.params.targetID  + '/driverOnThePath').child(lam.driverPositionID ).set(lam)
-          }
-        )*/
-
-
-            }
-          )
-          
-
-          
-       
-    });
