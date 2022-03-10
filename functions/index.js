@@ -2,6 +2,7 @@ const functions = require("firebase-functions");
 // The Firebase Admin SDK to access Firestore.
 const admin = require('firebase-admin');
 const turf = require('@turf/turf');
+const geofire = require('geofire-common');
 //import * as turf from "@turf/turf";
 admin.initializeApp();
 // // Create and Deploy Your First Cloud Functions
@@ -17,6 +18,41 @@ admin.initializeApp();
 // Firestore under the path /messages/:documentId/original
 
 //beginning of functions not embedded.....
+
+// Take the text parameter passed to this HTTP endpoint and insert it into 
+// Firestore under the path /messages/:documentId/original
+var globalVariable  = [];
+exports.addMessage = functions.https.onRequest(async (req, res) => {
+  // Grab the text parameter.
+  const original = req.query.text;
+  // Push the new message into Firestore using the Firebase Admin SDK.
+  //const writeResult = await admin.database().ref('messages').add({original: original});
+  let obj ={
+    [original] : original
+  }
+  globalVariable.push(obj);
+
+  // Send back a message that we've successfully written the message
+  res.json({result:globalVariable}); // `Message with ID: ${writeResult.id} added.`
+});
+
+
+exports.ajouterText = functions.https.onRequest(async (req, res) => {
+  // Grab the text parameter.
+  const original = req.query.text;
+  // Push the new message into Firestore using the Firebase Admin SDK.
+  //const writeResult = await admin.database().ref('messages').add({original: original});
+  let obj ={
+    [original] : original + "ajouter "
+  }
+  globalVariable.push(obj);
+
+  // Send back a message that we've successfully written the message
+  res.json({result:globalVariable}); // `Message with ID: ${writeResult.id} added.`
+});
+
+
+
     function compareDistance(a, b) {
       //properties
       return a.properties.distanceToPoint - b.properties.distanceToPoint;
@@ -88,6 +124,26 @@ admin.initializeApp();
 
     exports.driversOnClientDestination = functions.database.ref('users/destinationPoint/{destinationId}/clients/{values}/{pushID}')
     .onCreate( (snapshot, context) => {
+    /*
+    nombre de chauffeur C
+    => pour chaque chauffeur .... on va entrer la position du chauffeur ...  
+    =>Entrer les midpoints de chaque chauffeur => M * C 
+    => M * O(1+C) => O(MC)
+    pour chaque rider =>  R *  o(log(M + R)
+
+    */
+    // Add the hash and the lat/lng to the document. We will use the hash
+    // for queries and the lat/lng for distance comparisons.
+    //country => city => users => location 
+    // country => city => drivers => midpoint (geohash, lat,lng,id : uid, role, places_vailable, place_Taken, )
+    //country => city => drivers => location ... on time T.
+    //matched_driver_rider
+    // update 
+    /*
+    closest driver based on location..... 
+      compare rider position to driver nearby and filter false positive...
+    */
+
       // Grab the current value of what was written to the Realtime Database.
      // const original = snapshot.val();
      // functions.logger.log('drivers on the path', context.params.destinationId, original);
@@ -130,24 +186,18 @@ admin.initializeApp();
             return obj;
         })
       ) 
-        //convertir la position de l'utilisateur en question
         let voisinageClient = context.params.values.split(',');
           voisinageClient = voisinageClient.map( elmnt =>  Number((elmnt.replace("+","."))));
-        //convertir en turf point les chauffeurs
-      let voisinageClientDriverID = turf.featureCollection( AllFavouriteDriversPosition.map (elmnt => {
+     let voisinageClientDriverID = turf.featureCollection( AllFavouriteDriversPosition.map (elmnt => {
           let  obja= turf.point(elmnt.point)
           obja.driverID = elmnt.driverId
           obja.place = elmnt.place
          return obja;
        }))
-       
-       //choisir les 10 plus proches ... chauffeurs allant dans cette directions.... 
        let chauffeurFavorable = neighborPointMod(voisinageClient,voisinageClientDriverID);
        let pickupPointVal = context.params.values;
 
        admin.database().ref('/users/favoTaxis/'+ context.params.destinationId).child (pickupPointVal).set(chauffeurFavorable);
-     //  admin.database().ref('/users/destinationPoint').child(context.params.destinationId).set({});
-      //  return snapshot.ref.parent.parent.child('DriverInDestinationDirection').set({tester:"voir..."});
         
      })
 
@@ -155,7 +205,7 @@ admin.initializeApp();
     });
 
 
-exports.filterDriver = functions.database.ref('/requests/{destinationID}/{departureID}/{nbreOfPeople}/{uid}/')
+/*exports.filterDriver = functions.database.ref('/requests/{destinationID}/{departureID}/{nbreOfPeople}/{uid}/')
 .onCreate( async (snapshot, context) => {
   let clientID =  snapshot.val();
   let destination = context.params.destinationID;
@@ -180,11 +230,10 @@ exports.filterDriver = functions.database.ref('/requests/{destinationID}/{depart
     }
   }).filter(Boolean);
   admin.database().ref('/users/potentialMatch/' + destination + '/' + departure).child(clientID).set(filteredDrivers);
- });
+ });*/
 
 
-
-    exports.driversCloseToClientpickupPoint = functions.database.ref('users/pickupPoint/{pickupID}/clients/{pushID}') ///clients
+   /* exports.driversCloseToClientpickupPoint = functions.database.ref('users/pickupPoint/{pickupID}/clients/{pushID}') ///clients
     .onCreate((snapshot, context) => {
      //const original = snapshot.val();
      // functions.logger.log('neighbor drivers', context.params.pickupID, original);
@@ -208,5 +257,55 @@ exports.filterDriver = functions.database.ref('/requests/{destinationID}/{depart
              return  admin.database().ref('/users/pickupPoint/' + context.params.pickupID + '/neighbor').set(neighborPointMod(targetPoint, pointsWithDriverID))
            
           })
-    });
+    })*/
+    function nearBy(coordinates,radius,url){
+      const bounds = geofire.geohashQueryBounds(coordinates,radius);
+      const promises =[] ;
+     for ( const b of bounds ){
+        const q = admin.database().ref(url) //('Cameroon/Douala/drivers/midPoints/ISK99cVxlsUWiJnSsj6z7AD7hts1')
+        .orderByChild('geohash')
+         .startAt(b[0])
+        .endAt(b[1])
+         promises.push(q.once('value'))
+      }
 
+     return Promise.all(promises).then(snapshots => {
+        var matching = [];
+        for (const snap of snapshots){
+          for (const key in snap.val()){
+             if(snap.val()){
+              const lat = snap.val()[key].lat;
+              const long = snap.val()[key].lng;
+              const distanceInKm = geofire.distanceBetween([lat,long],coordinates);
+              const distanceInM  = distanceInKm * 1000;
+              if (distanceInM <= radius){
+                if (!matching.includes(snap.val()[key].uid)) {
+                  matching.push(snap.val()[key].uid);
+                }
+              }
+            }
+          } 
+
+        }
+        return matching;
+      })
+    }
+
+    //exports.driverNearBy = functions.database.ref('Cameroon/{city}/rider/pickupPoint/{riderID}') 
+    exports.driverNearBy = functions.database.ref('Cameroon/Douala/rider/{riderID}') //{city}
+    .onCreate(async (snapshot, context) => {
+      let  matchedDriver =[];
+      let country = 'Cameroon';//context.params.country;
+      let city = 'Douala';//context.params.city;
+      let riderID = context.params.riderID;
+      
+      let rider = snapshot.val();
+      const pickupCoordinates = [rider.pickup.lat,rider.pickup.lng];
+      const destinationCoordinates = [rider.destination.lat,rider.destination.lng];
+
+      let nearestDriver = await nearBy(pickupCoordinates,5000,`${country}/${city}/drivers/position`)
+
+     // nearestDriver.map (async  driverID =>  await nearBy(destinationCoordinates,800,`${country}/${city}/drivers/midPoints/${driverID}`))
+      //
+      console.log("Here is the result ...",nearestDriver);
+    });
